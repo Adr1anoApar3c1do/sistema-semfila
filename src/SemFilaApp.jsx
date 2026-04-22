@@ -25,6 +25,15 @@ const DEFAULT_SERVICES = [
 
 const SERVICES_KEY = "semfila_services_v1";
 
+function formatCpf(value) {
+  const numbers = value.replace(/\D/g, "").slice(0, 11);
+
+  return numbers
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+}
+
 function normalizePhone(phone) {
   return phone.replace(/\D/g, "");
 }
@@ -145,15 +154,17 @@ function getCurrentItem(queue) {
 }
 
 function buildNotificationMessage(ticket, peopleAhead) {
-  const estimatedMinutes = estimateMinutes(peopleAhead);
+  const estimatedMinutes = Math.max(
+    peopleAhead * AVG_SERVICE_MINUTES,
+    AVG_SERVICE_MINUTES
+  );
 
-  return `Olá, ${ticket.name}! 👋
-Sua senha no SemFila é ${ticket.number}.
-Faltam aproximadamente ${peopleAhead} pessoa(s) para o seu atendimento.
-Tempo estimado: ${estimatedMinutes} minuto(s).
-Serviço: ${ticket.service}.
-
-Dirija-se ao atendimento em breve.`;
+  return `*Olá*, ${ticket.name} 
+Sua senha no Sem Fila é *${ticket.number}*.
+Você é o próximo a ser atendido.
+Tempo estimado: *${estimatedMinutes}* minuto(s).
+Tipo do Serviço: *${ticket.service}*.
+*Dirija-se ao atendimento em breve.*`;
 }
 
 function sendWhatsAppNotification(ticket, peopleAhead) {
@@ -168,22 +179,23 @@ function sendWhatsAppNotification(ticket, peopleAhead) {
 function applyNotifications(queue) {
   const waiting = getWaitingQueue(queue);
 
+  if (!waiting.length) return queue;
+
+  const nextToNotify = waiting[0];
+
   return queue.map((item) => {
-    if (item.status !== "aguardando") return item;
+    if (item.id !== nextToNotify.id) return item;
     if (!item.notifyWhatsApp || !item.phone) return item;
 
-    const index = waiting.findIndex((waitingItem) => waitingItem.id === item.id);
-    const peopleAhead = index >= 0 ? index : 0;
+    const alreadySent = item.notified || false;
 
-    const alreadySentSteps = item.notificationSteps || [];
-
-    if (peopleAhead <= 2 && !alreadySentSteps.includes(peopleAhead)) {
-      sendWhatsAppNotification(item, peopleAhead);
+    if (!alreadySent) {
+      sendWhatsAppNotification(item, 0);
 
       return {
         ...item,
         notified: true,
-        notificationSteps: [...alreadySentSteps, peopleAhead],
+        notificationSteps: [0],
       };
     }
 
@@ -239,6 +251,9 @@ function TicketCard({ ticket }) {
           <strong>Nome:</strong> {ticket.name}
         </p>
         <p>
+          <strong>CPF:</strong> {ticket.cpf || "-"}
+        </p>
+        <p>
           <strong>Serviço:</strong> {ticket.service}
         </p>
         <p>
@@ -271,6 +286,7 @@ function QueueTable({ title, items, emptyText, actions }) {
               <tr>
                 <th>Senha</th>
                 <th>Nome</th>
+                <th>CPF</th>
                 <th>Serviço</th>
                 <th>Status</th>
                 <th>Posição</th>
@@ -285,6 +301,7 @@ function QueueTable({ title, items, emptyText, actions }) {
                 <tr key={item.id}>
                   <td>{item.number}</td>
                   <td>{item.name}</td>
+                  <td>{item.cpf || "-"}</td>
                   <td>{item.service}</td>
                   <td>{getStatusLabel(item.status)}</td>
                   <td>
@@ -328,6 +345,8 @@ function ClientPage({
   lastTicket,
   name,
   setName,
+  cpf,
+  setCpf,
   services,
   service,
   setService,
@@ -355,7 +374,7 @@ function ClientPage({
 
         <form onSubmit={onAddToQueue} className="form-grid">
           <div className="form-group">
-            <label>Nome</label>
+            <label>Nome Completo:</label>
             <input
               type="text"
               placeholder="Digite seu nome"
@@ -364,21 +383,39 @@ function ClientPage({
             />
           </div>
 
-          <div className="form-group">
-            <label>Telefone</label>
-            <div className="input-with-icon">
-              <Phone size={16} />
-              <input
-                type="tel"
-                placeholder="(18) 99999-9999"
-                value={phone}
-                onChange={(e) => setPhone(formatPhone(e.target.value))}
-              />
-            </div>
+                
+                <div className="form-row two-columns">
+        <div className="form-group">
+          <label>CPF:</label>
+          <input
+            type="text"
+            placeholder="Digite seu CPF"
+            value={cpf}
+            placeholder="999.999.999-99"
+            onChange={(e) => setCpf(formatCpf(e.target.value))}
+            maxLength={14}
+            required
+          />
+        </div>
+
+        <div className="form-group">
+          <label>Telefone:</label>
+          <div className="input-with-icon">
+            <Phone size={16} />
+            <input
+              type="tel"
+              placeholder="(15) 99999-9999"
+              value={phone}
+              onChange={(e) => setPhone(formatPhone(e.target.value))}
+            />
           </div>
+        </div>
+      </div>
+
+
 
           <div className="form-group">
-            <label>Serviço</label>
+            <label>Tipo de Atendimento:</label>
             <select value={service} onChange={(e) => setService(e.target.value)}>
               {services.map((option) => (
                 <option key={option} value={option}>
@@ -387,10 +424,6 @@ function ClientPage({
               ))}
             </select>
           </div>
-
-
-
-
 
           <div className="form-group checkbox-group">
             <label className="checkbox-label">
@@ -455,12 +488,7 @@ function ClientPage({
       </section>
 
       <section className="card notes-card">
-        <h3>Observações da versão 2</h3>
-        <ul>
-          <li>Os dados ficam salvos no navegador com localStorage.</li>
-          <li>O WhatsApp abre com a mensagem pronta quando a vez está próxima.</li>
-          <li>O Painel de Atendimento exige senha administrativa.</li>
-        </ul>
+        <h3>Projeto Sem Fila Versão 3</h3>
       </section>
     </div>
   );
@@ -512,11 +540,7 @@ function AdminPage({
   onRemove,
   onReset,
   onLogout,
-  services,
-  newService,
-  setNewService,
-  onAddService,
-  onRemoveService,
+  onOpenServices,
 }) {
   const waiting = getWaitingQueue(queue);
   const current = queue.filter((item) => item.status === "em_atendimento");
@@ -582,8 +606,12 @@ function AdminPage({
             Chamar próxima senha
           </button>
 
-          <button className="secondary-btn" type="button" onClick={onFinishCurrent}>
+          <button className="primary-btn" type="button" onClick={onFinishCurrent}>
             Finalizar atendimento atual
+          </button>
+
+          <button className="primary-btn" type="button" onClick={onOpenServices}>
+            Cadastrar Novo Serviço
           </button>
 
           <button className="danger-btn" type="button" onClick={onReset}>
@@ -591,48 +619,6 @@ function AdminPage({
           </button>
         </div>
       </section>
-<section className="card admin-services-card">
-  <div className="section-title">
-    <div className="section-icon blue">
-      <PlusCircle size={18} />
-    </div>
-    <div>
-      <h2>Cadastrar serviços</h2>
-      <p>Adicione ou remova os serviços disponíveis no atendimento.</p>
-    </div>
-  </div>
-
-  <div className="service-manager">
-    <div className="service-input-row">
-      <input
-        type="text"
-        placeholder="Digite o nome do serviço"
-        value={newService}
-        onChange={(e) => setNewService(e.target.value)}
-      />
-
-      <button type="button" className="primary-btn" onClick={onAddService}>
-        Adicionar serviço
-      </button>
-    </div>
-
-    <div className="service-list">
-      {services.map((item) => (
-        <div key={item} className="service-item">
-          <span>{item}</span>
-
-          <button
-            type="button"
-            className="mini-btn danger"
-            onClick={() => onRemoveService(item)}
-          >
-            Excluir
-          </button>
-        </div>
-      ))}
-    </div>
-  </div>
-</section>
 
       <QueueTable
         title="Em atendimento"
@@ -674,59 +660,97 @@ function AdminPage({
       />
     </div>
   );
+}
 
-<section className="card admin-services-card">
-  <div className="section-title">
-    <div className="section-icon blue">
-      <PlusCircle size={18} />
-    </div>
-    <div>
-      <h2>Cadastrar serviços</h2>
-      <p>Adicione ou remova os serviços disponíveis no atendimento.</p>
-    </div>
-  </div>
+function AdminServicesPage({
+  services,
+  newService,
+  setNewService,
+  onAddService,
+  onRemoveService,
+  onBack,
+  onLogout,
+}) {
+  return (
+    <div className="page-grid">
+      <section className="card admin-actions-card">
+        <div className="admin-topbar">
+          <div className="admin-title-block">
+            <div className="section-icon blue">
+              <PlusCircle size={18} />
+            </div>
 
-  <div className="service-manager">
-    <div className="service-input-row">
-      <input
-        type="text"
-        placeholder="Digite o nome do serviço"
-        value={newService}
-        onChange={(e) => setNewService(e.target.value)}
-      />
-
-      <button type="button" className="primary-btn" onClick={onAddService}>
-        Adicionar serviço
-      </button>
-    </div>
-
-    <div className="service-list">
-      {services.map((item) => (
-        <div key={item} className="service-item">
-          <span>{item}</span>
+            <div>
+              <h2 className="admin-title">Cadastrar Serviços</h2>
+              <p className="admin-subtitle">
+                Adicione ou remova os serviços disponíveis no atendimento.
+              </p>
+            </div>
+          </div>
 
           <button
+            className="primary-btn admin-exit-btn"
             type="button"
-            className="mini-btn danger"
-            onClick={() => onRemoveService(item)}
+            onClick={onLogout}
           >
-            Excluir
+            <LogOut size={16} />
+            Área do Cliente
           </button>
         </div>
-      ))}
+
+        <div className="service-back-row">
+          <button type="button" className="primary-btn" onClick={onBack}>
+            Painel de Atendimento
+          </button>
+        </div>
+
+        <div className="service-manager">
+          <div className="service-input-row">
+            <input
+              type="text"
+              placeholder="Digite o nome do serviço"
+              value={newService}
+              onChange={(e) => setNewService(e.target.value)}
+            />
+
+            <button
+              type="button"
+              className="primary-btn services-side-btn"
+              onClick={onAddService}
+            >
+              Adicionar Serviço
+            </button>
+          </div>
+
+          <div className="service-list">
+            {services.map((item) => (
+              <div key={item} className="service-item">
+                <span>{item}</span>
+
+                <button
+                  type="button"
+                  className="mini-btn danger"
+                  onClick={() => onRemoveService(item)}
+                >
+                  Excluir
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
     </div>
-  </div>
-</section>
-
-
+  );
 }
 
 export default function SemFilaApp() {
   const [activeTab, setActiveTab] = useState("cliente");
+  const [adminView, setAdminView] = useState("painel");
   const [queue, setQueue] = useState([]);
   const [lastTicket, setLastTicket] = useState(null);
 
   const [name, setName] = useState("");
+  const [cpf, setCpf] = useState("");
   const [services, setServices] = useState(DEFAULT_SERVICES);
   const [service, setService] = useState(DEFAULT_SERVICES[0]);
   const [newService, setNewService] = useState("");
@@ -742,14 +766,14 @@ export default function SemFilaApp() {
     const storedLastTicket = localStorage.getItem(LAST_TICKET_KEY);
     const storedServices = localStorage.getItem(SERVICES_KEY);
 
-if (storedServices) {
-  const parsedServices = JSON.parse(storedServices);
+    if (storedServices) {
+      const parsedServices = JSON.parse(storedServices);
 
-  if (Array.isArray(parsedServices) && parsedServices.length > 0) {
-    setServices(parsedServices);
-    setService(parsedServices[0]);
-  }
-}
+      if (Array.isArray(parsedServices) && parsedServices.length > 0) {
+        setServices(parsedServices);
+        setService(parsedServices[0]);
+      }
+    }
 
     if (storedQueue) {
       const parsedQueue = JSON.parse(storedQueue);
@@ -792,6 +816,11 @@ if (storedServices) {
       return;
     }
 
+    if (!cpf.trim() || cpf.length < 14) {
+      alert("Digite um CPF válido.");
+      return;
+    }
+
     if (notifyWhatsApp && normalizePhone(phone).length < 10) {
       alert("Digite um telefone válido com DDD.");
       return;
@@ -804,6 +833,7 @@ if (storedServices) {
       id: Date.now(),
       number: nextNumber,
       name: name.trim(),
+      cpf,
       service,
       phone: notifyWhatsApp ? normalizePhone(phone) : "",
       notifyWhatsApp,
@@ -816,12 +846,14 @@ if (storedServices) {
     };
 
     const updatedQueue = updateQueue([...queue, newTicket]);
-    const savedTicket = updatedQueue.find((item) => item.id === newTicket.id) || newTicket;
+    const savedTicket =
+      updatedQueue.find((item) => item.id === newTicket.id) || newTicket;
 
     setLastTicket(savedTicket);
     saveLastTicket(savedTicket);
 
     setName("");
+    setCpf("");
     setService(services[0] || "");
     setPhone("");
     setNotifyWhatsApp(true);
@@ -920,6 +952,7 @@ if (storedServices) {
       setIsAdminAuthenticated(true);
       setLoginError("");
       setPasswordInput("");
+      setAdminView("painel");
       return;
     }
 
@@ -930,16 +963,61 @@ if (storedServices) {
     setIsAdminAuthenticated(false);
     setPasswordInput("");
     setLoginError("");
+    setAdminView("painel");
     setActiveTab("cliente");
+  }
+
+  function handleAddService() {
+    const trimmed = newService.trim();
+
+    if (!trimmed) {
+      alert("Digite o nome do serviço.");
+      return;
+    }
+
+    const alreadyExists = services.some(
+      (item) => item.toLowerCase() === trimmed.toLowerCase()
+    );
+
+    if (alreadyExists) {
+      alert("Esse serviço já está cadastrado.");
+      return;
+    }
+
+    const updatedServices = [...services, trimmed];
+    setServices(updatedServices);
+    localStorage.setItem(SERVICES_KEY, JSON.stringify(updatedServices));
+    setNewService("");
+  }
+
+  function handleRemoveService(serviceName) {
+    if (services.length === 1) {
+      alert("É necessário manter pelo menos um serviço cadastrado.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Deseja excluir o serviço "${serviceName}"?`
+    );
+
+    if (!confirmed) return;
+
+    const updatedServices = services.filter((item) => item !== serviceName);
+    setServices(updatedServices);
+    localStorage.setItem(SERVICES_KEY, JSON.stringify(updatedServices));
+
+    if (service === serviceName) {
+      setService(updatedServices[0]);
+    }
   }
 
   return (
     <div className="semfila-app">
       <header className="topbar">
         <div>
-          <h1>SemFila</h1>
+          <h1>SEMFILA</h1>
           <p>
-            Sistema inteligente de fila com previsão de atendimento e atualização em tempo real.
+            Fluxo Ativo - Sistema de Gestão de Filas Inteligentes.
           </p>
         </div>
 
@@ -965,34 +1043,43 @@ if (storedServices) {
       {activeTab === "cliente" ? (
         <ClientPage
           queue={queue}
-            lastTicket={syncedLastTicket}
-            name={name}
-            setName={setName}
-            services={services}
-            service={service}
-            setService={setService}
-            phone={phone}
-            setPhone={setPhone}
-            notifyWhatsApp={notifyWhatsApp}
-            setNotifyWhatsApp={setNotifyWhatsApp}
-            onAddToQueue={handleAddToQueue}
-            />
+          lastTicket={syncedLastTicket}
+          name={name}
+          setName={setName}
+          cpf={cpf}
+          setCpf={setCpf}
+          services={services}
+          service={service}
+          setService={setService}
+          phone={phone}
+          setPhone={setPhone}
+          notifyWhatsApp={notifyWhatsApp}
+          setNotifyWhatsApp={setNotifyWhatsApp}
+          onAddToQueue={handleAddToQueue}
+        />
       ) : isAdminAuthenticated ? (
-            <AdminPage
+        adminView === "painel" ? (
+          <AdminPage
             queue={queue}
             onCallNext={handleCallNext}
             onFinishCurrent={handleFinishCurrent}
             onRemove={handleRemove}
             onReset={handleReset}
             onLogout={handleAdminLogout}
+            onOpenServices={() => setAdminView("servicos")}
+          />
+        ) : (
+          <AdminServicesPage
             services={services}
             newService={newService}
             setNewService={setNewService}
             onAddService={handleAddService}
             onRemoveService={handleRemoveService}
-        />
-      ) : 
-      (
+            onBack={() => setAdminView("painel")}
+            onLogout={handleAdminLogout}
+          />
+        )
+      ) : (
         <AdminLogin
           passwordInput={passwordInput}
           setPasswordInput={setPasswordInput}
@@ -1002,50 +1089,4 @@ if (storedServices) {
       )}
     </div>
   );
-
-function handleAddService() {
-  const trimmed = newService.trim();
-
-  if (!trimmed) {
-    alert("Digite o nome do serviço.");
-    return;
-  }
-
-  const alreadyExists = services.some(
-    (item) => item.toLowerCase() === trimmed.toLowerCase()
-  );
-
-  if (alreadyExists) {
-    alert("Esse serviço já está cadastrado.");
-    return;
-  }
-
-  const updatedServices = [...services, trimmed];
-  setServices(updatedServices);
-  localStorage.setItem(SERVICES_KEY, JSON.stringify(updatedServices));
-  setNewService("");
-}
-
-function handleRemoveService(serviceName) {
-  if (services.length === 1) {
-    alert("É necessário manter pelo menos um serviço cadastrado.");
-    return;
-  }
-
-  const confirmed = window.confirm(
-    `Deseja excluir o serviço "${serviceName}"?`
-  );
-
-  if (!confirmed) return;
-
-  const updatedServices = services.filter((item) => item !== serviceName);
-  setServices(updatedServices);
-  localStorage.setItem(SERVICES_KEY, JSON.stringify(updatedServices));
-
-  if (service === serviceName) {
-    setService(updatedServices[0]);
-  }
-}
-
-  
 }
