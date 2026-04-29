@@ -49,7 +49,7 @@ body {
   background: rgba(255, 255, 255, 0.12);
   padding: 6px;
   border-radius: 18px;
-  min-width: 300px;
+  min-width: 460px;
   justify-content: space-between;
 }
 
@@ -66,7 +66,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-width: 138px;
+  min-width: 118px;
   transition: all 0.2s ease;
 }
 
@@ -443,7 +443,7 @@ body {
   gap: 6px;
   white-space: nowrap;
   padding: 10px 14px;
-  border-radius: px;
+  border-radius: 14px;
   width: 100%;
   max-width: 190px;
   height: 44px;
@@ -598,4 +598,68 @@ body {
   .form-row.two-columns {
     grid-template-columns: 1fr;
   }
+}
+/* ==============================
+   TELA MOBILE DO USUÁRIO
+   ============================== */
+.mobile-page-wrapper { display: flex; justify-content: center; padding: 20px 0 40px; }
+.mobile-phone-frame { width: 100%; max-width: 390px; min-height: 760px; background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%); border-radius: 34px; padding: 18px; box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18); border: 10px solid #172033; }
+.mobile-status-bar { display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; font-weight: 800; color: #172033; padding: 2px 8px 12px; }
+.mobile-header { background: linear-gradient(135deg, #0b1736, #31496b); color: #ffffff; padding: 20px; border-radius: 24px; display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.mobile-logo { width: 46px; height: 46px; border-radius: 16px; background: rgba(255, 255, 255, 0.16); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.mobile-header h2 { margin: 0 0 4px; font-size: 1.35rem; line-height: 1.1; }
+.mobile-header p { margin: 0; font-size: 0.9rem; color: rgba(255, 255, 255, 0.86); }
+.mobile-form { display: grid; gap: 14px; }
+.mobile-field { display: grid; gap: 7px; }
+.mobile-field label { font-size: 0.9rem; font-weight: 700; color: #172033; }
+.mobile-field input, .mobile-field select { width: 100%; height: 48px; border-radius: 16px; border: 1px solid #cfd8e6; padding: 0 14px; font-size: 0.96rem; background: #ffffff; outline: none; }
+.mobile-field input:focus, .mobile-field select:focus { border-color: #245bdb; box-shadow: 0 0 0 3px rgba(36, 91, 219, 0.12); }
+.mobile-check { display: flex; align-items: center; gap: 9px; font-size: 0.9rem; font-weight: 600; color: #24324a; }
+.mobile-check input { width: 16px; height: 16px; }
+.mobile-main-btn { height: 52px; border: none; border-radius: 18px; background: #0b1736; color: #ffffff; font-size: 1rem; font-weight: 800; cursor: pointer; margin-top: 4px; }
+.mobile-ticket-area { margin-top: 22px; background: #ffffff; border: 1px solid #e4eaf3; border-radius: 24px; padding: 18px; text-align: center; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06); }
+.mobile-ticket-area span { display: block; color: #62708a; font-size: 0.9rem; margin-bottom: 6px; }
+.mobile-ticket-area strong { display: block; font-size: 2.6rem; color: #0b1736; margin-bottom: 12px; }
+.mobile-ticket-info { text-align: left; background: #f7f9fc; border-radius: 18px; padding: 12px 14px; }
+.mobile-ticket-info p { margin: 7px 0; color: #24324a; font-size: 0.94rem; }
+.mobile-empty { margin: 0; color: #62708a; font-size: 0.94rem; }
+@media (max-width: 900px) { .tabs { min-width: 100%; } }
+@media (max-width: 640px) { .mobile-page-wrapper { padding: 0; } .mobile-phone-frame { max-width: 100%; min-height: auto; border: none; border-radius: 0; box-shadow: none; padding: 16px; } .topbar { display: none; } }
+
+.mobile-track-btn {
+  width: 100%;
+  height: 48px;
+  border: none;
+  border-radius: 18px;
+  background: #e9eef8;
+  color: #172033;
+  font-size: 0.96rem;
+  font-weight: 800;
+  cursor: pointer;
+  margin-top: 14px;
+}
+
+.mobile-track-btn:hover {
+  background: #dde6f5;
+}
+
+.mobile-tracking-box {
+  margin-top: 14px;
+  background: #f7f9fc;
+  border: 1px solid #e4eaf3;
+  border-radius: 20px;
+  padding: 14px;
+  text-align: left;
+}
+
+.mobile-tracking-box h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  color: #172033;
+}
+
+.mobile-tracking-box p {
+  margin: 7px 0;
+  color: #24324a;
+  font-size: 0.92rem;
 }
