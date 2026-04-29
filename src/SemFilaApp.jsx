@@ -8,10 +8,12 @@ import {
   Phone,
   Lock,
   LogOut,
+  Smartphone,
 } from "lucide-react";
 
-const STORAGE_KEY = "semfila_queue_v2";
-const LAST_TICKET_KEY = "semfila_last_ticket_v2";
+const STORAGE_KEY = "semfila_queue_v3";
+const LAST_TICKET_KEY = "semfila_last_ticket_v3";
+const SERVICES_KEY = "semfila_services_v1";
 const AVG_SERVICE_MINUTES = 10;
 const ADMIN_PASSWORD = "1234";
 
@@ -19,23 +21,22 @@ const DEFAULT_SERVICES = [
   "Atendimento Geral",
   "Cadastro",
   "Retirada de Documento",
+  "Retirada de Exames",
   "Financeiro",
   "Suporte",
 ];
 
-const SERVICES_KEY = "semfila_services_v1";
+function normalizePhone(phone) {
+  return String(phone || "").replace(/\D/g, "");
+}
 
 function formatCpf(value) {
-  const numbers = value.replace(/\D/g, "").slice(0, 11);
+  const numbers = String(value || "").replace(/\D/g, "").slice(0, 11);
 
   return numbers
     .replace(/(\d{3})(\d)/, "$1.$2")
     .replace(/(\d{3})(\d)/, "$1.$2")
     .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-}
-
-function normalizePhone(phone) {
-  return phone.replace(/\D/g, "");
 }
 
 function formatPhone(phone) {
@@ -54,6 +55,11 @@ function formatPhone(phone) {
     .replace(/^\((\d{2})(\d)/, "($1) $2")
     .replace(/(\d{5})(\d)/, "$1-$2")
     .replace(/(-\d{4})\d+?$/, "$1");
+}
+
+function formatTicketNumber(number) {
+  if (!number) return "-";
+  return `A${String(number).padStart(3, "0")}`;
 }
 
 function buildWhatsAppLink(phone, message) {
@@ -102,7 +108,7 @@ function getStatusLabel(status) {
     case "finalizado":
       return "Finalizado";
     default:
-      return status;
+      return status || "-";
   }
 }
 
@@ -110,11 +116,14 @@ function reindexQueue(queue) {
   const waiting = queue
     .filter((item) => item.status === "aguardando")
     .sort((a, b) => new Date(a.joinedAt) - new Date(b.joinedAt))
-    .map((item, index) => ({
-      ...item,
-      position: index + 1,
-      estimatedMinutes: estimateMinutes(index),
-    }));
+    .map((item, index) => {
+      const position = index + 1;
+      return {
+        ...item,
+        position,
+        estimatedMinutes: estimateMinutes(position),
+      };
+    });
 
   const current = queue
     .filter((item) => item.status === "em_atendimento")
@@ -159,12 +168,9 @@ function buildNotificationMessage(ticket, peopleAhead) {
     AVG_SERVICE_MINUTES
   );
 
-  return `*Olá*, ${ticket.name} 
-Sua senha no Sem Fila é *${ticket.number}*.
-Você é o próximo a ser atendido.
-Tempo estimado: *${estimatedMinutes}* minuto(s).
-Tipo do Serviço: *${ticket.service}*.
-*Dirija-se ao atendimento em breve.*`;
+  return `Olá, ${ticket.name}. Sua senha no SemFila é ${formatTicketNumber(
+    ticket.number
+  )}. Você é o próximo a ser atendido. Tempo estimado: ${estimatedMinutes} minuto(s). Serviço: ${ticket.service}. Dirija-se ao atendimento em breve.`;
 }
 
 function sendWhatsAppNotification(ticket, peopleAhead) {
@@ -187,11 +193,8 @@ function applyNotifications(queue) {
     if (item.id !== nextToNotify.id) return item;
     if (!item.notifyWhatsApp || !item.phone) return item;
 
-    const alreadySent = item.notified || false;
-
-    if (!alreadySent) {
+    if (!item.notified) {
       sendWhatsAppNotification(item, 0);
-
       return {
         ...item,
         notified: true,
@@ -205,11 +208,7 @@ function applyNotifications(queue) {
 
 function TicketCard({ ticket }) {
   if (!ticket) {
-    return (
-      <div className="empty-box">
-        Nenhuma senha gerada ainda neste navegador.
-      </div>
-    );
+    return <div className="empty-box">Nenhuma senha gerada ainda neste navegador.</div>;
   }
 
   return (
@@ -217,7 +216,7 @@ function TicketCard({ ticket }) {
       <div className="ticket-main">
         <div>
           <span className="ticket-label">Senha</span>
-          <strong className="ticket-number">{ticket.number}</strong>
+          <strong className="ticket-number">{formatTicketNumber(ticket.number)}</strong>
         </div>
 
         <div>
@@ -247,23 +246,11 @@ function TicketCard({ ticket }) {
       </div>
 
       <div className="ticket-extra">
-        <p>
-          <strong>Nome:</strong> {ticket.name}
-        </p>
-        <p>
-          <strong>CPF:</strong> {ticket.cpf || "-"}
-        </p>
-        <p>
-          <strong>Serviço:</strong> {ticket.service}
-        </p>
-        <p>
-          <strong>Entrada:</strong> {formatDateTime(ticket.joinedAt)}
-        </p>
-        {ticket.phone ? (
-          <p>
-            <strong>Telefone:</strong> {formatPhone(ticket.phone)}
-          </p>
-        ) : null}
+        <p><strong>Nome:</strong> {ticket.name}</p>
+        <p><strong>CPF:</strong> {ticket.cpf || "-"}</p>
+        <p><strong>Serviço:</strong> {ticket.service}</p>
+        <p><strong>Entrada:</strong> {formatDateTime(ticket.joinedAt)}</p>
+        {ticket.phone ? <p><strong>Telefone:</strong> {formatPhone(ticket.phone)}</p> : null}
       </div>
     </div>
   );
@@ -299,21 +286,13 @@ function QueueTable({ title, items, emptyText, actions }) {
             <tbody>
               {items.map((item) => (
                 <tr key={item.id}>
-                  <td>{item.number}</td>
+                  <td>{formatTicketNumber(item.number)}</td>
                   <td>{item.name}</td>
                   <td>{item.cpf || "-"}</td>
                   <td>{item.service}</td>
                   <td>{getStatusLabel(item.status)}</td>
-                  <td>
-                    {item.status === "em_atendimento"
-                      ? "Agora"
-                      : item.position ?? "-"}
-                  </td>
-                  <td>
-                    {item.status === "aguardando"
-                      ? `${item.estimatedMinutes ?? 0} min`
-                      : "-"}
-                  </td>
+                  <td>{item.status === "em_atendimento" ? "Agora" : item.position ?? "-"}</td>
+                  <td>{item.status === "aguardando" ? `${item.estimatedMinutes ?? 0} min` : "-"}</td>
                   <td>{item.phone ? formatPhone(item.phone) : "-"}</td>
                   <td>{formatHour(item.joinedAt)}</td>
                   <td>
@@ -363,64 +342,55 @@ function ClientPage({
     <div className="page-grid">
       <section className="card form-card">
         <div className="section-title">
-          <div className="section-icon blue">
-            <PlusCircle size={18} />
-          </div>
+          <div className="section-icon blue"><PlusCircle size={18} /></div>
           <div>
-            <h2>Entrar na fila</h2>
-            <p>Preencha os dados para gerar sua senha.</p>
+            <h2>Cadastro do usuário</h2>
+            <p>Faça seu cadastro, escolha o serviço desejado e gere sua senha digital.</p>
           </div>
         </div>
 
         <form onSubmit={onAddToQueue} className="form-grid">
           <div className="form-group">
-            <label>Nome Completo:</label>
+            <label>Nome completo:</label>
             <input
               type="text"
-              placeholder="Digite seu nome"
+              placeholder="Digite seu nome completo"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
           </div>
 
-                
-                <div className="form-row two-columns">
-        <div className="form-group">
-          <label>CPF:</label>
-          <input
-            type="text"
-            placeholder="Digite seu CPF"
-            value={cpf}
-            placeholder="999.999.999-99"
-            onChange={(e) => setCpf(formatCpf(e.target.value))}
-            maxLength={14}
-            required
-          />
-        </div>
+          <div className="form-row two-columns">
+            <div className="form-group">
+              <label>CPF:</label>
+              <input
+                type="text"
+                placeholder="999.999.999-99"
+                value={cpf}
+                onChange={(e) => setCpf(formatCpf(e.target.value))}
+                maxLength={14}
+              />
+            </div>
 
-        <div className="form-group">
-          <label>Telefone:</label>
-          <div className="input-with-icon">
-            <Phone size={16} />
-            <input
-              type="tel"
-              placeholder="(15) 99999-9999"
-              value={phone}
-              onChange={(e) => setPhone(formatPhone(e.target.value))}
-            />
+            <div className="form-group">
+              <label>Telefone / WhatsApp:</label>
+              <div className="input-with-icon">
+                <Phone size={16} />
+                <input
+                  type="tel"
+                  placeholder="(15) 99999-9999"
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhone(e.target.value))}
+                />
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-
-
 
           <div className="form-group">
-            <label>Tipo de Atendimento:</label>
+            <label>Serviço desejado:</label>
             <select value={service} onChange={(e) => setService(e.target.value)}>
               {services.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
+                <option key={option} value={option}>{option}</option>
               ))}
             </select>
           </div>
@@ -436,17 +406,13 @@ function ClientPage({
             </label>
           </div>
 
-          <button className="primary-btn" type="submit">
-            Gerar senha e entrar na fila
-          </button>
+          <button className="primary-btn" type="submit">Gerar senha e entrar na fila</button>
         </form>
       </section>
 
       <section className="card">
         <div className="section-title">
-          <div className="section-icon green">
-            <Ticket size={18} />
-          </div>
+          <div className="section-icon green"><Ticket size={18} /></div>
           <div>
             <h2>Acompanhamento</h2>
             <p>Consulte a última senha gerada neste navegador.</p>
@@ -458,9 +424,7 @@ function ClientPage({
 
       <section className="card info-card">
         <div className="section-title">
-          <div className="section-icon yellow">
-            <Bell size={18} />
-          </div>
+          <div className="section-icon yellow"><Bell size={18} /></div>
           <div>
             <h2>Painel rápido</h2>
             <p>Resumo da fila em tempo real.</p>
@@ -468,28 +432,134 @@ function ClientPage({
         </div>
 
         <div className="stats-grid">
-          <div className="stat-box">
-            <span>Total aguardando</span>
-            <strong>{waiting.length}</strong>
-          </div>
-          <div className="stat-box">
-            <span>Em atendimento</span>
-            <strong>{current ? 1 : 0}</strong>
-          </div>
-          <div className="stat-box">
-            <span>Próxima senha</span>
-            <strong>{waiting[0]?.number ?? "-"}</strong>
-          </div>
-          <div className="stat-box">
-            <span>Tempo médio</span>
-            <strong>{AVG_SERVICE_MINUTES} min</strong>
-          </div>
+          <div className="stat-box"><span>Total aguardando</span><strong>{waiting.length}</strong></div>
+          <div className="stat-box"><span>Em atendimento</span><strong>{current ? 1 : 0}</strong></div>
+          <div className="stat-box"><span>Próxima senha</span><strong>{formatTicketNumber(waiting[0]?.number)}</strong></div>
+          <div className="stat-box"><span>Tempo médio</span><strong>{AVG_SERVICE_MINUTES} min</strong></div>
         </div>
       </section>
 
       <section className="card notes-card">
-        <h3>Projeto Sem Fila Versão 3</h3>
+        <h3>Projeto SemFila - Versão Web</h3>
       </section>
+    </div>
+  );
+}
+
+function MobileUserPage({
+  lastTicket,
+  name,
+  setName,
+  cpf,
+  setCpf,
+  services,
+  service,
+  setService,
+  phone,
+  setPhone,
+  notifyWhatsApp,
+  setNotifyWhatsApp,
+  onAddToQueue,
+}) {
+  return (
+    <div className="mobile-page-wrapper">
+      <div className="mobile-phone-frame">
+        <div className="mobile-status-bar">
+          <span>9:41</span>
+          <span>SemFila</span>
+        </div>
+
+        <div className="mobile-header">
+          <div className="mobile-logo"><Smartphone size={22} /></div>
+          <div>
+            <h2>SemFila Mobile</h2>
+            <p>Entre na fila pelo celular</p>
+          </div>
+        </div>
+
+        <form onSubmit={onAddToQueue} className="mobile-form">
+          <div className="mobile-field">
+            <label>Nome completo</label>
+            <input
+              type="text"
+              placeholder="Digite seu nome"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+
+          <div className="mobile-field">
+            <label>CPF</label>
+            <input
+              type="text"
+              placeholder="999.999.999-99"
+              value={cpf}
+              onChange={(e) => setCpf(formatCpf(e.target.value))}
+              maxLength={14}
+            />
+          </div>
+
+          <div className="mobile-field">
+            <label>Telefone / WhatsApp</label>
+            <input
+              type="tel"
+              placeholder="(15) 99999-9999"
+              value={phone}
+              onChange={(e) => setPhone(formatPhone(e.target.value))}
+            />
+          </div>
+
+          <div className="mobile-field">
+            <label>Serviço desejado</label>
+            <select value={service} onChange={(e) => setService(e.target.value)}>
+              {services.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </div>
+
+          <label className="mobile-check">
+            <input
+              type="checkbox"
+              checked={notifyWhatsApp}
+              onChange={(e) => setNotifyWhatsApp(e.target.checked)}
+            />
+            Receber aviso pelo WhatsApp
+          </label>
+
+          <button className="mobile-main-btn" type="submit">Entrar na fila</button>
+        </form>
+
+        <div className="mobile-ticket-area">
+          {lastTicket ? (
+            <>
+              <span>Sua senha digital</span>
+              <strong>{formatTicketNumber(lastTicket.number)}</strong>
+
+              <div className="mobile-ticket-info">
+                <p><b>Status:</b> {getStatusLabel(lastTicket.status)}</p>
+                <p>
+                  <b>Posição:</b>{" "}
+                  {lastTicket.status === "em_atendimento"
+                    ? "Sendo atendido"
+                    : lastTicket.status === "finalizado"
+                    ? "-"
+                    : `${lastTicket.position ?? "-"}º`}
+                </p>
+                <p>
+                  <b>Tempo estimado:</b>{" "}
+                  {lastTicket.status === "aguardando"
+                    ? `${lastTicket.estimatedMinutes ?? 0} min`
+                    : "Agora"}
+                </p>
+                <p><b>Serviço:</b> {lastTicket.service}</p>
+              </div>
+            </>
+          ) : (
+            <p className="mobile-empty">Após o cadastro, sua senha aparecerá aqui.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -499,9 +569,7 @@ function AdminLogin({ passwordInput, setPasswordInput, onLogin, loginError }) {
     <div className="page-grid">
       <section className="card admin-login-card">
         <div className="section-title">
-          <div className="section-icon dark">
-            <Lock size={18} />
-          </div>
+          <div className="section-icon dark"><Lock size={18} /></div>
           <div>
             <h2>Acesso ao Painel de Atendimento</h2>
             <p>Digite a senha administrativa para continuar.</p>
@@ -524,9 +592,7 @@ function AdminLogin({ passwordInput, setPasswordInput, onLogin, loginError }) {
 
           {loginError ? <div className="error-text">{loginError}</div> : null}
 
-          <button className="primary-btn" type="button" onClick={onLogin}>
-            Entrar no painel
-          </button>
+          <button className="primary-btn" type="button" onClick={onLogin}>Entrar no painel</button>
         </div>
       </section>
     </div>
@@ -560,63 +626,31 @@ function AdminPage({
       <section className="card admin-actions-card">
         <div className="admin-topbar">
           <div className="admin-title-block">
-            <div className="section-icon dark">
-              <LayoutDashboard size={18} />
-            </div>
-
+            <div className="section-icon dark"><LayoutDashboard size={18} /></div>
             <div>
               <h2 className="admin-title">Painel de atendimento</h2>
-              <p className="admin-subtitle">
-                Gerencie a fila, chame clientes e finalize atendimentos.
-              </p>
+              <p className="admin-subtitle">Gerencie a fila, chame clientes e finalize atendimentos.</p>
             </div>
           </div>
 
-          <button
-            className="secondary-btn admin-exit-btn"
-            type="button"
-            onClick={onLogout}
-          >
+          <button className="secondary-btn admin-exit-btn" type="button" onClick={onLogout}>
             <LogOut size={16} />
             Sair
           </button>
         </div>
 
         <div className="stats-grid">
-          <div className="stat-box">
-            <span>Aguardando</span>
-            <strong>{waiting.length}</strong>
-          </div>
-          <div className="stat-box">
-            <span>Em atendimento</span>
-            <strong>{current.length}</strong>
-          </div>
-          <div className="stat-box">
-            <span>Finalizados</span>
-            <strong>{finished.length}</strong>
-          </div>
-          <div className="stat-box">
-            <span>Espera média</span>
-            <strong>{averageWait} min</strong>
-          </div>
+          <div className="stat-box"><span>Aguardando</span><strong>{waiting.length}</strong></div>
+          <div className="stat-box"><span>Em atendimento</span><strong>{current.length}</strong></div>
+          <div className="stat-box"><span>Finalizados</span><strong>{finished.length}</strong></div>
+          <div className="stat-box"><span>Espera média</span><strong>{averageWait} min</strong></div>
         </div>
 
         <div className="admin-buttons">
-          <button className="primary-btn" type="button" onClick={onCallNext}>
-            Chamar próxima senha
-          </button>
-
-          <button className="primary-btn" type="button" onClick={onFinishCurrent}>
-            Finalizar atendimento atual
-          </button>
-
-          <button className="primary-btn" type="button" onClick={onOpenServices}>
-            Cadastrar Novo Serviço
-          </button>
-
-          <button className="danger-btn" type="button" onClick={onReset}>
-            Limpar fila
-          </button>
+          <button className="primary-btn" type="button" onClick={onCallNext}>Chamar próxima senha</button>
+          <button className="primary-btn" type="button" onClick={onFinishCurrent}>Finalizar atendimento atual</button>
+          <button className="primary-btn" type="button" onClick={onOpenServices}>Cadastrar Novo Serviço</button>
+          <button className="danger-btn" type="button" onClick={onReset}>Limpar fila</button>
         </div>
       </section>
 
@@ -624,39 +658,21 @@ function AdminPage({
         title="Em atendimento"
         items={current}
         emptyText="Nenhum atendimento em andamento."
-        actions={[
-          {
-            label: "Finalizar",
-            variant: "success",
-            onClick: onFinishCurrent,
-          },
-        ]}
+        actions={[{ label: "Finalizar", variant: "success", onClick: onFinishCurrent }]}
       />
 
       <QueueTable
         title="Aguardando"
         items={waiting}
         emptyText="Nenhuma pessoa aguardando na fila."
-        actions={[
-          {
-            label: "Remover",
-            variant: "danger",
-            onClick: onRemove,
-          },
-        ]}
+        actions={[{ label: "Remover", variant: "danger", onClick: onRemove }]}
       />
 
       <QueueTable
         title="Finalizados"
         items={finished}
         emptyText="Nenhum atendimento finalizado."
-        actions={[
-          {
-            label: "Remover",
-            variant: "danger",
-            onClick: onRemove,
-          },
-        ]}
+        actions={[{ label: "Remover", variant: "danger", onClick: onRemove }]}
       />
     </div>
   );
@@ -676,32 +692,21 @@ function AdminServicesPage({
       <section className="card admin-actions-card">
         <div className="admin-topbar">
           <div className="admin-title-block">
-            <div className="section-icon blue">
-              <PlusCircle size={18} />
-            </div>
-
+            <div className="section-icon blue"><PlusCircle size={18} /></div>
             <div>
               <h2 className="admin-title">Cadastrar Serviços</h2>
-              <p className="admin-subtitle">
-                Adicione ou remova os serviços disponíveis no atendimento.
-              </p>
+              <p className="admin-subtitle">Adicione ou remova os serviços disponíveis no atendimento.</p>
             </div>
           </div>
 
-          <button
-            className="primary-btn admin-exit-btn"
-            type="button"
-            onClick={onLogout}
-          >
+          <button className="primary-btn admin-exit-btn" type="button" onClick={onLogout}>
             <LogOut size={16} />
             Área do Cliente
           </button>
         </div>
 
         <div className="service-back-row">
-          <button type="button" className="primary-btn" onClick={onBack}>
-            Painel de Atendimento
-          </button>
+          <button type="button" className="primary-btn" onClick={onBack}>Painel de Atendimento</button>
         </div>
 
         <div className="service-manager">
@@ -713,27 +718,14 @@ function AdminServicesPage({
               onChange={(e) => setNewService(e.target.value)}
             />
 
-            <button
-              type="button"
-              className="primary-btn services-side-btn"
-              onClick={onAddService}
-            >
-              Adicionar Serviço
-            </button>
+            <button type="button" className="primary-btn services-side-btn" onClick={onAddService}>Adicionar Serviço</button>
           </div>
 
           <div className="service-list">
             {services.map((item) => (
               <div key={item} className="service-item">
                 <span>{item}</span>
-
-                <button
-                  type="button"
-                  className="mini-btn danger"
-                  onClick={() => onRemoveService(item)}
-                >
-                  Excluir
-                </button>
+                <button type="button" className="mini-btn danger" onClick={() => onRemoveService(item)}>Excluir</button>
               </div>
             ))}
           </div>
@@ -744,7 +736,7 @@ function AdminServicesPage({
 }
 
 export default function SemFilaApp() {
-  const [activeTab, setActiveTab] = useState("cliente");
+  const [activeTab, setActiveTab] = useState("mobile");
   const [adminView, setAdminView] = useState("painel");
   const [queue, setQueue] = useState([]);
   const [lastTicket, setLastTicket] = useState(null);
@@ -762,28 +754,39 @@ export default function SemFilaApp() {
   const [loginError, setLoginError] = useState("");
 
   useEffect(() => {
+    const storedServices = localStorage.getItem(SERVICES_KEY);
     const storedQueue = localStorage.getItem(STORAGE_KEY);
     const storedLastTicket = localStorage.getItem(LAST_TICKET_KEY);
-    const storedServices = localStorage.getItem(SERVICES_KEY);
 
     if (storedServices) {
-      const parsedServices = JSON.parse(storedServices);
-
-      if (Array.isArray(parsedServices) && parsedServices.length > 0) {
-        setServices(parsedServices);
-        setService(parsedServices[0]);
+      try {
+        const parsedServices = JSON.parse(storedServices);
+        if (Array.isArray(parsedServices) && parsedServices.length > 0) {
+          setServices(parsedServices);
+          setService(parsedServices[0]);
+        }
+      } catch {
+        localStorage.removeItem(SERVICES_KEY);
       }
     }
 
     if (storedQueue) {
-      const parsedQueue = JSON.parse(storedQueue);
-      const reindexed = reindexQueue(parsedQueue);
-      setQueue(reindexed);
-      saveQueue(reindexed);
+      try {
+        const parsedQueue = JSON.parse(storedQueue);
+        const reindexed = reindexQueue(parsedQueue);
+        setQueue(reindexed);
+        saveQueue(reindexed);
+      } catch {
+        localStorage.removeItem(STORAGE_KEY);
+      }
     }
 
     if (storedLastTicket) {
-      setLastTicket(JSON.parse(storedLastTicket));
+      try {
+        setLastTicket(JSON.parse(storedLastTicket));
+      } catch {
+        localStorage.removeItem(LAST_TICKET_KEY);
+      }
     }
   }, []);
 
@@ -812,7 +815,7 @@ export default function SemFilaApp() {
     e.preventDefault();
 
     if (!name.trim()) {
-      alert("Digite o nome do cliente.");
+      alert("Digite o nome do usuário.");
       return;
     }
 
@@ -826,8 +829,8 @@ export default function SemFilaApp() {
       return;
     }
 
-    const activeNumbers = queue.map((item) => item.number);
-    const nextNumber = activeNumbers.length ? Math.max(...activeNumbers) + 1 : 1;
+    const usedNumbers = queue.map((item) => Number(item.number) || 0);
+    const nextNumber = usedNumbers.length ? Math.max(...usedNumbers) + 1 : 1;
 
     const newTicket = {
       id: Date.now(),
@@ -846,8 +849,7 @@ export default function SemFilaApp() {
     };
 
     const updatedQueue = updateQueue([...queue, newTicket]);
-    const savedTicket =
-      updatedQueue.find((item) => item.id === newTicket.id) || newTicket;
+    const savedTicket = updatedQueue.find((item) => item.id === newTicket.id) || newTicket;
 
     setLastTicket(savedTicket);
     saveLastTicket(savedTicket);
@@ -857,6 +859,8 @@ export default function SemFilaApp() {
     setService(services[0] || "");
     setPhone("");
     setNotifyWhatsApp(true);
+
+    alert(`Cadastro realizado com sucesso! Sua senha é ${formatTicketNumber(savedTicket.number)}.`);
   }
 
   function handleCallNext() {
@@ -917,7 +921,7 @@ export default function SemFilaApp() {
 
   function handleRemove(item) {
     const confirmed = window.confirm(
-      `Deseja remover a senha ${item.number} de ${item.name}?`
+      `Deseja remover a senha ${formatTicketNumber(item.number)} de ${item.name}?`
     );
 
     if (!confirmed) return;
@@ -964,7 +968,7 @@ export default function SemFilaApp() {
     setPasswordInput("");
     setLoginError("");
     setAdminView("painel");
-    setActiveTab("cliente");
+    setActiveTab("mobile");
   }
 
   function handleAddService() {
@@ -996,10 +1000,7 @@ export default function SemFilaApp() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Deseja excluir o serviço "${serviceName}"?`
-    );
-
+    const confirmed = window.confirm(`Deseja excluir o serviço "${serviceName}"?`);
     if (!confirmed) return;
 
     const updatedServices = services.filter((item) => item !== serviceName);
@@ -1016,12 +1017,18 @@ export default function SemFilaApp() {
       <header className="topbar">
         <div>
           <h1>SEMFILA</h1>
-          <p>
-            Fluxo Ativo - Sistema de Gestão de Filas Inteligentes.
-          </p>
+          <p>Fluxo Ativo - Sistema de Gestão de Filas Inteligentes.</p>
         </div>
 
         <div className="tabs">
+          <button
+            className={activeTab === "mobile" ? "tab active" : "tab"}
+            onClick={() => setActiveTab("mobile")}
+            type="button"
+          >
+            Mobile
+          </button>
+
           <button
             className={activeTab === "cliente" ? "tab active" : "tab"}
             onClick={() => setActiveTab("cliente")}
@@ -1035,12 +1042,28 @@ export default function SemFilaApp() {
             onClick={handleAdminTabClick}
             type="button"
           >
-            Painel de Atendimento
+            Painel
           </button>
         </div>
       </header>
 
-      {activeTab === "cliente" ? (
+      {activeTab === "mobile" ? (
+        <MobileUserPage
+          lastTicket={syncedLastTicket}
+          name={name}
+          setName={setName}
+          cpf={cpf}
+          setCpf={setCpf}
+          services={services}
+          service={service}
+          setService={setService}
+          phone={phone}
+          setPhone={setPhone}
+          notifyWhatsApp={notifyWhatsApp}
+          setNotifyWhatsApp={setNotifyWhatsApp}
+          onAddToQueue={handleAddToQueue}
+        />
+      ) : activeTab === "cliente" ? (
         <ClientPage
           queue={queue}
           lastTicket={syncedLastTicket}
