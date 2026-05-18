@@ -26,6 +26,8 @@ const DEFAULT_SERVICES = [
   "Suporte",
 ];
 
+
+
 function normalizePhone(phone) {
   return String(phone || "").replace(/\D/g, "");
 }
@@ -740,6 +742,16 @@ export default function SemFilaApp() {
   const [adminView, setAdminView] = useState("painel");
   const [queue, setQueue] = useState([]);
   const [lastTicket, setLastTicket] = useState(null);
+  const [successMessage, setSuccessMessage] = useState(false);
+  const [generatedTicket, setGeneratedTicket] = useState("");
+
+  const [modalMessage, setModalMessage] = useState("");
+  const [modalType, setModalType] = useState("info");
+
+  function showModal(message, type = "info") {
+  setModalMessage(message);
+  setModalType(type);
+  }
 
   const [name, setName] = useState("");
   const [cpf, setCpf] = useState("");
@@ -815,17 +827,17 @@ export default function SemFilaApp() {
     e.preventDefault();
 
     if (!name.trim()) {
-      alert("Digite o nome do usuário.");
+      showModal("Digite o nome do usuário.");
       return;
     }
 
     if (!cpf.trim() || cpf.length < 14) {
-      alert("Digite um CPF válido.");
+      showModal("Digite um CPF válido.", "error");
       return;
     }
 
     if (notifyWhatsApp && normalizePhone(phone).length < 10) {
-      alert("Digite um telefone válido com DDD.");
+      showModal("Digite um telefone válido com DDD.");
       return;
     }
 
@@ -860,21 +872,22 @@ export default function SemFilaApp() {
     setPhone("");
     setNotifyWhatsApp(true);
 
-    alert(`Cadastro realizado com sucesso! Sua senha é ${formatTicketNumber(savedTicket.number)}.`);
+    setGeneratedTicket(formatTicketNumber(savedTicket.number));
+    setSuccessMessage(true);
   }
 
   function handleCallNext() {
     const currentItem = getCurrentItem(queue);
 
     if (currentItem) {
-      alert("Já existe um atendimento em andamento. Finalize o atual primeiro.");
+      showModal("Já existe um atendimento em andamento. Finalize o atual primeiro.");
       return;
     }
 
     const waiting = getWaitingQueue(queue);
 
     if (!waiting.length) {
-      alert("Não há ninguém aguardando na fila.");
+      showModal("Não há ninguém aguardando na fila.");
       return;
     }
 
@@ -904,7 +917,7 @@ export default function SemFilaApp() {
         : getCurrentItem(queue);
 
     if (!currentItem) {
-      alert("Nenhum atendimento em andamento.");
+      showModal("Nenhum atendimento em andamento.");
       return;
     }
 
@@ -975,7 +988,7 @@ export default function SemFilaApp() {
     const trimmed = newService.trim();
 
     if (!trimmed) {
-      alert("Digite o nome do serviço.");
+      showModal("Digite o nome do serviço.");
       return;
     }
 
@@ -984,7 +997,7 @@ export default function SemFilaApp() {
     );
 
     if (alreadyExists) {
-      alert("Esse serviço já está cadastrado.");
+      showModal("Esse serviço já está cadastrado.");
       return;
     }
 
@@ -996,7 +1009,7 @@ export default function SemFilaApp() {
 
   function handleRemoveService(serviceName) {
     if (services.length === 1) {
-      alert("É necessário manter pelo menos um serviço cadastrado.");
+      showModal("É necessário manter pelo menos um serviço cadastrado.");
       return;
     }
 
@@ -1014,6 +1027,51 @@ export default function SemFilaApp() {
 
   return (
     <div className="semfila-app">
+      {successMessage && (
+      <div className="success-overlay">
+        <div className="success-modal">
+          <h2>Cadastro concluído com sucesso!</h2>
+
+          <p>Sua senha de atendimento é:</p>
+
+          <div className="success-ticket-number">
+            {generatedTicket}
+          </div>
+
+          <p className="success-text">
+            Aguarde ser chamado pelo painel ou acompanhe sua posição na fila.
+          </p>
+
+          <button type="button" onClick={() => setSuccessMessage(false)}>
+            Entendi
+          </button>
+        </div>
+      </div>
+    )}
+    {modalMessage && (
+  <div className="success-overlay">
+    <div className={`alert-modal ${modalType}`}>
+      <h2>
+        {modalType === "error"
+          ? "Atenção"
+          : modalType === "success"
+          ? "Sucesso"
+          : "Aviso"}
+      </h2>
+
+      <p>{modalMessage}</p>
+
+      <button type="button" onClick={() => setModalMessage("")}>
+        Entendi
+      </button>
+    </div>
+  </div>
+)}
+
+    
+
+
+
       <header className="topbar">
         <div>
           <h1>SEMFILA</h1>
