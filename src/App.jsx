@@ -1,4 +1,4 @@
-import SemFilaApp from "./SemFilaApp_firebase";
+import SemFilaApp from "./SemFilaApp";
 
 export default function App() {
   return <SemFilaApp />;
