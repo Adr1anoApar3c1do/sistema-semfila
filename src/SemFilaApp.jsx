@@ -1,4 +1,17 @@
 import React, { useEffect, useMemo, useState } from "react";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  updateDoc,
+  writeBatch,
+} from "firebase/firestore";
+import { db } from "./firebase";
 import "./SemFilaApp.css";
 import {
   Bell,
@@ -18,15 +31,21 @@ const AVG_SERVICE_MINUTES = 10;
 const ADMIN_PASSWORD = "1234";
 
 const DEFAULT_SERVICES = [
-  "Atendimento Geral",
-  "Cadastro",
-  "Retirada de Documento",
   "Retirada de Exames",
-  "Financeiro",
-  "Suporte",
+  "Entrega de Exames",
+  "Coleta de Exames",
+  "Clínico Geral",
+  "Pediatria",
+  "Ginecologia / Saúde da mulher",
+  "Vacinação",
+  "Enfermagem",
+  "Odontologia",
+  "Psicologia",
+  "Ortopedia",
+  "Fonoaudiologia",
+  "Neuropediatria",
+  "Assistência Social"
 ];
-
-
 
 function normalizePhone(phone) {
   return String(phone || "").replace(/\D/g, "");
@@ -70,8 +89,9 @@ function buildWhatsAppLink(phone, message) {
     ? cleanPhone
     : `55${cleanPhone}`;
 
-  return `https://wa.me/${phoneWithCountry}?text=${encodeURIComponent(message)}`;
+  return `whatsapp://send?phone=${phoneWithCountry}&text=${encodeURIComponent(message)}`;
 }
+
 
 function formatDateTime(dateString) {
   if (!dateString) return "-";
@@ -442,13 +462,15 @@ function ClientPage({
       </section>
 
       <section className="card notes-card">
-        <h3>Projeto SemFila - Versão Web</h3>
+        <h3>Projeto SemFila - V3 - Versão Web</h3>
+        
       </section>
     </div>
   );
 }
 
 function MobileUserPage({
+  queue,
   lastTicket,
   name,
   setName,
@@ -463,11 +485,20 @@ function MobileUserPage({
   setNotifyWhatsApp,
   onAddToQueue,
 }) {
+
+
+  const [showTracking, setShowTracking] = useState(false);
+
+  const current = getCurrentItem(queue);
+  const waiting = getWaitingQueue(queue);
+  const nextTicket = waiting[0];
+
+  
   return (
     <div className="mobile-page-wrapper">
       <div className="mobile-phone-frame">
         <div className="mobile-status-bar">
-          <span>9:41</span>
+          <span>Sem Fila</span>
           <span>SemFila</span>
         </div>
 
@@ -560,6 +591,54 @@ function MobileUserPage({
           ) : (
             <p className="mobile-empty">Após o cadastro, sua senha aparecerá aqui.</p>
           )}
+
+                  <button
+          className="mobile-track-btn"
+          type="button"
+          onClick={() => setShowTracking(!showTracking)}
+        >
+          {showTracking ? "Ocultar acompanhamento" : "Acompanhar fila"}
+        </button>
+
+        {showTracking ? (
+          <div className="mobile-tracking-box">
+            <h3>Acompanhamento da fila</h3>
+
+            <p>
+              <b>Senha em atendimento:</b>{" "}
+              {current ? formatTicketNumber(current.number) : "Nenhuma"}
+            </p>
+
+            <p>
+              <b>Próxima senha:</b>{" "}
+              {nextTicket ? formatTicketNumber(nextTicket.number) : "Nenhuma"}
+            </p>
+
+            <p>
+              <b>Total aguardando:</b> {waiting.length}
+            </p>
+
+            <p>
+              <b>Minha posição:</b>{" "}
+              {lastTicket?.status === "aguardando"
+                ? `${lastTicket.position ?? "-"}º`
+                : lastTicket?.status === "em_atendimento"
+                ? "Sendo atendido"
+                : lastTicket?.status === "finalizado"
+                ? "Finalizado"
+                : "-"}
+            </p>
+
+            <p>
+              <b>Tempo estimado:</b>{" "}
+              {lastTicket?.status === "aguardando"
+                ? `${lastTicket.estimatedMinutes ?? 0} min`
+                : lastTicket
+                ? "Agora"
+                : "-"}
+            </p>
+          </div>
+        ) : null}
         </div>
       </div>
     </div>
@@ -738,25 +817,18 @@ function AdminServicesPage({
 }
 
 export default function SemFilaApp() {
-  const [activeTab, setActiveTab] = useState("mobile");
+  const [activeTab, setActiveTab] = useState("cliente");
   const [adminView, setAdminView] = useState("painel");
   const [queue, setQueue] = useState([]);
-  const [lastTicket, setLastTicket] = useState(null);
-  const [successMessage, setSuccessMessage] = useState(false);
-  const [generatedTicket, setGeneratedTicket] = useState("");
-
-  const [modalMessage, setModalMessage] = useState("");
-  const [modalType, setModalType] = useState("info");
-
-  function showModal(message, type = "info") {
-  setModalMessage(message);
-  setModalType(type);
-  }
+  const [lastTicketId, setLastTicketId] = useState(() => {
+    return localStorage.getItem(LAST_TICKET_KEY) || "";
+  });
 
   const [name, setName] = useState("");
   const [cpf, setCpf] = useState("");
   const [services, setServices] = useState(DEFAULT_SERVICES);
   const [service, setService] = useState(DEFAULT_SERVICES[0]);
+  const [serviceDocs, setServiceDocs] = useState([]);
   const [newService, setNewService] = useState("");
   const [phone, setPhone] = useState("");
   const [notifyWhatsApp, setNotifyWhatsApp] = useState(true);
@@ -765,69 +837,110 @@ export default function SemFilaApp() {
   const [passwordInput, setPasswordInput] = useState("");
   const [loginError, setLoginError] = useState("");
 
+  const [successMessage, setSuccessMessage] = useState(false);
+  const [generatedTicket, setGeneratedTicket] = useState("");
+  const [modalMessage, setModalMessage] = useState("");
+  const [modalType, setModalType] = useState("info");
+
+  function showModal(message, type = "info") {
+    setModalMessage(message);
+    setModalType(type);
+  }
+
   useEffect(() => {
-    const storedServices = localStorage.getItem(SERVICES_KEY);
-    const storedQueue = localStorage.getItem(STORAGE_KEY);
-    const storedLastTicket = localStorage.getItem(LAST_TICKET_KEY);
+  async function seedDefaultServicesIfEmpty() {
+    const servicesSnapshot = await getDocs(collection(db, "services"));
 
-    if (storedServices) {
-      try {
-        const parsedServices = JSON.parse(storedServices);
-        if (Array.isArray(parsedServices) && parsedServices.length > 0) {
-          setServices(parsedServices);
-          setService(parsedServices[0]);
+    if (!servicesSnapshot.empty) return;
+
+    const batch = writeBatch(db);
+
+    DEFAULT_SERVICES.forEach((serviceName, index) => {
+      const serviceRef = doc(collection(db, "services"));
+      batch.set(serviceRef, {
+        name: serviceName,
+        createdAt: Date.now() + index,
+      });
+    });
+
+    await batch.commit();
+  }
+
+  seedDefaultServicesIfEmpty().catch((error) => {
+    console.error("Erro ao criar serviços padrão:", error);
+    showModal("Não foi possível carregar os serviços padrão.", "error");
+  });
+}, []);
+
+  useEffect(() => {
+    const servicesQuery = query(collection(db, "services"), orderBy("createdAt", "asc"));
+
+    const unsubscribe = onSnapshot(
+      servicesQuery,
+      (snapshot) => {
+        const loadedServices = snapshot.docs.map((serviceDoc) => ({
+          id: serviceDoc.id,
+          ...serviceDoc.data(),
+        }));
+
+        if (!loadedServices.length) {
+          setServices(DEFAULT_SERVICES);
+          setService(DEFAULT_SERVICES[0]);
+          setServiceDocs([]);
+          return;
         }
-      } catch {
-        localStorage.removeItem(SERVICES_KEY);
-      }
-    }
 
-    if (storedQueue) {
-      try {
-        const parsedQueue = JSON.parse(storedQueue);
-        const reindexed = reindexQueue(parsedQueue);
-        setQueue(reindexed);
-        saveQueue(reindexed);
-      } catch {
-        localStorage.removeItem(STORAGE_KEY);
-      }
-    }
+        const serviceNames = loadedServices.map((item) => item.name);
+        setServiceDocs(loadedServices);
+        setServices(serviceNames);
 
-    if (storedLastTicket) {
-      try {
-        setLastTicket(JSON.parse(storedLastTicket));
-      } catch {
-        localStorage.removeItem(LAST_TICKET_KEY);
+        setService((currentService) => {
+          if (serviceNames.includes(currentService)) return currentService;
+          return serviceNames[0] || "";
+        });
+      },
+      (error) => {
+        console.error("Erro ao carregar serviços do Firebase:", error);
+        showModal("Não foi possível carregar os serviços do Firebase.", "error");
       }
-    }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const queueQuery = query(collection(db, "queue"), orderBy("joinedAt", "asc"));
+
+    const unsubscribe = onSnapshot(
+      queueQuery,
+      (snapshot) => {
+        const loadedQueue = snapshot.docs.map((queueDoc) => ({
+          docId: queueDoc.id,
+          id: queueDoc.id,
+          ...queueDoc.data(),
+        }));
+
+        setQueue(reindexQueue(loadedQueue));
+      },
+      (error) => {
+        console.error("Erro ao carregar fila do Firebase:", error);
+        showModal("Não foi possível carregar a fila do Firebase.", "error");
+      }
+    );
+
+    return () => unsubscribe();
   }, []);
 
   const syncedLastTicket = useMemo(() => {
-    if (!lastTicket) return null;
-    return queue.find((item) => item.id === lastTicket.id) || lastTicket;
-  }, [queue, lastTicket]);
+    if (!lastTicketId) return null;
+    return queue.find((item) => item.docId === lastTicketId) || null;
+  }, [queue, lastTicketId]);
 
-  function updateQueue(newQueue) {
-    const reindexed = reindexQueue(newQueue);
-    setQueue(reindexed);
-    saveQueue(reindexed);
-
-    if (lastTicket) {
-      const updatedLast = reindexed.find((item) => item.id === lastTicket.id);
-      if (updatedLast) {
-        setLastTicket(updatedLast);
-        saveLastTicket(updatedLast);
-      }
-    }
-
-    return reindexed;
-  }
-
-  function handleAddToQueue(e) {
+  async function handleAddToQueue(e) {
     e.preventDefault();
 
     if (!name.trim()) {
-      showModal("Digite o nome do usuário.");
+      showModal("Digite o nome do usuário.", "info");
       return;
     }
 
@@ -837,7 +950,7 @@ export default function SemFilaApp() {
     }
 
     if (notifyWhatsApp && normalizePhone(phone).length < 10) {
-      showModal("Digite um telefone válido com DDD.");
+      showModal("Digite um telefone válido com DDD.", "error");
       return;
     }
 
@@ -845,7 +958,6 @@ export default function SemFilaApp() {
     const nextNumber = usedNumbers.length ? Math.max(...usedNumbers) + 1 : 1;
 
     const newTicket = {
-      id: Date.now(),
       number: nextNumber,
       name: name.trim(),
       cpf,
@@ -860,103 +972,130 @@ export default function SemFilaApp() {
       estimatedMinutes: 0,
     };
 
-    const updatedQueue = updateQueue([...queue, newTicket]);
-    const savedTicket = updatedQueue.find((item) => item.id === newTicket.id) || newTicket;
+    try {
+      const docRef = await addDoc(collection(db, "queue"), newTicket);
+      setLastTicketId(docRef.id);
+      localStorage.setItem(LAST_TICKET_KEY, docRef.id);
 
-    setLastTicket(savedTicket);
-    saveLastTicket(savedTicket);
+      setName("");
+      setCpf("");
+      setService(services[0] || "");
+      setPhone("");
+      setNotifyWhatsApp(true);
 
-    setName("");
-    setCpf("");
-    setService(services[0] || "");
-    setPhone("");
-    setNotifyWhatsApp(true);
-
-    setGeneratedTicket(formatTicketNumber(savedTicket.number));
-    setSuccessMessage(true);
-  }
-
-  function handleCallNext() {
-    const currentItem = getCurrentItem(queue);
-
-    if (currentItem) {
-      showModal("Já existe um atendimento em andamento. Finalize o atual primeiro.");
-      return;
-    }
-
-    const waiting = getWaitingQueue(queue);
-
-    if (!waiting.length) {
-      showModal("Não há ninguém aguardando na fila.");
-      return;
-    }
-
-    const nextItem = waiting[0];
-
-    const updatedBase = queue.map((item) =>
-      item.id === nextItem.id
-        ? { ...item, status: "em_atendimento", position: 0, estimatedMinutes: 0 }
-        : item
-    );
-
-    const reindexed = updateQueue(updatedBase);
-    const withNotifications = applyNotifications(reindexed);
-    const finalQueue = updateQueue(withNotifications);
-
-    const updatedLast = finalQueue.find((item) => item.id === syncedLastTicket?.id);
-    if (updatedLast) {
-      setLastTicket(updatedLast);
-      saveLastTicket(updatedLast);
+      setGeneratedTicket(formatTicketNumber(nextNumber));
+      setSuccessMessage(true);
+    } catch (error) {
+      console.error("Erro ao cadastrar na fila:", error);
+      showModal("Não foi possível cadastrar na fila. Verifique a conexão com o Firebase.", "error");
     }
   }
 
-  function handleFinishCurrent(itemFromButton) {
-    const currentItem =
-      itemFromButton?.status === "em_atendimento"
-        ? itemFromButton
-        : getCurrentItem(queue);
+  async function handleCallNext() {
+  const currentItem = getCurrentItem(queue);
 
-    if (!currentItem) {
-      showModal("Nenhum atendimento em andamento.");
-      return;
-    }
-
-    const updatedQueue = queue.map((item) =>
-      item.id === currentItem.id
-        ? { ...item, status: "finalizado", finishedAt: new Date().toISOString() }
-        : item
-    );
-
-    const reindexed = updateQueue(updatedQueue);
-    const withNotifications = applyNotifications(reindexed);
-    updateQueue(withNotifications);
+  if (currentItem) {
+    showModal("Já existe um atendimento em andamento. Finalize o atual primeiro.", "info");
+    return;
   }
 
-  function handleRemove(item) {
+  const waiting = getWaitingQueue(queue);
+
+  if (!waiting.length) {
+    showModal("Não há ninguém aguardando na fila.", "info");
+    return;
+  }
+
+  const nextItem = waiting[0];
+  const nextToNotify = waiting[1];
+
+  try {
+    await updateDoc(doc(db, "queue", nextItem.docId), {
+      status: "em_atendimento",
+      position: 0,
+      estimatedMinutes: 0,
+    });
+
+    if (
+      nextToNotify?.notifyWhatsApp &&
+      nextToNotify?.phone &&
+      !nextToNotify.notified
+    ) {
+      sendWhatsAppNotification(nextToNotify, 0);
+
+      await updateDoc(doc(db, "queue", nextToNotify.docId), {
+        notified: true,
+        notificationSteps: [0],
+      });
+    }
+  } catch (error) {
+    console.error("Erro ao chamar próxima senha:", error);
+    showModal("Não foi possível chamar a próxima senha.", "error");
+  }
+}
+
+  async function handleFinishCurrent(itemFromButton) {
+  const currentItem =
+    itemFromButton?.status === "em_atendimento"
+      ? itemFromButton
+      : getCurrentItem(queue);
+
+  if (!currentItem) {
+    showModal("Nenhum atendimento em andamento.", "info");
+    return;
+  }
+
+  try {
+    await updateDoc(doc(db, "queue", currentItem.docId), {
+      status: "finalizado",
+      finishedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Erro ao finalizar atendimento:", error);
+    showModal("Não foi possível finalizar o atendimento.", "error");
+  }
+}
+
+  async function handleRemove(item) {
     const confirmed = window.confirm(
       `Deseja remover a senha ${formatTicketNumber(item.number)} de ${item.name}?`
     );
 
     if (!confirmed) return;
 
-    const updatedQueue = queue.filter((queueItem) => queueItem.id !== item.id);
-    updateQueue(updatedQueue);
+    try {
+      await deleteDoc(doc(db, "queue", item.docId));
 
-    if (syncedLastTicket?.id === item.id) {
-      setLastTicket(null);
-      localStorage.removeItem(LAST_TICKET_KEY);
+      if (syncedLastTicket?.docId === item.docId) {
+        setLastTicketId("");
+        localStorage.removeItem(LAST_TICKET_KEY);
+      }
+    } catch (error) {
+      console.error("Erro ao remover senha:", error);
+      showModal("Não foi possível remover a senha.", "error");
     }
   }
 
-  function handleReset() {
+  async function handleReset() {
     const confirmed = window.confirm("Deseja realmente limpar toda a fila?");
 
     if (!confirmed) return;
 
-    setQueue([]);
-    setLastTicket(null);
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(LAST_TICKET_KEY);
+    try {
+      const snapshot = await getDocs(collection(db, "queue"));
+      const batch = writeBatch(db);
+
+      snapshot.docs.forEach((queueDoc) => {
+        batch.delete(doc(db, "queue", queueDoc.id));
+      });
+
+      await batch.commit();
+      setLastTicketId("");
+      localStorage.removeItem(LAST_TICKET_KEY);
+    } catch (error) {
+      console.error("Erro ao limpar fila:", error);
+      showModal("Não foi possível limpar a fila.", "error");
+    }
   }
 
   function handleAdminTabClick() {
@@ -981,14 +1120,14 @@ export default function SemFilaApp() {
     setPasswordInput("");
     setLoginError("");
     setAdminView("painel");
-    setActiveTab("mobile");
+    setActiveTab("cliente");
   }
 
-  function handleAddService() {
+  async function handleAddService() {
     const trimmed = newService.trim();
 
     if (!trimmed) {
-      showModal("Digite o nome do serviço.");
+      showModal("Digite o nome do serviço.", "info");
       return;
     }
 
@@ -997,80 +1136,94 @@ export default function SemFilaApp() {
     );
 
     if (alreadyExists) {
-      showModal("Esse serviço já está cadastrado.");
+      showModal("Esse serviço já está cadastrado.", "info");
       return;
     }
 
-    const updatedServices = [...services, trimmed];
-    setServices(updatedServices);
-    localStorage.setItem(SERVICES_KEY, JSON.stringify(updatedServices));
-    setNewService("");
+    try {
+      await addDoc(collection(db, "services"), {
+        name: trimmed,
+        createdAt: Date.now(),
+      });
+      setNewService("");
+    } catch (error) {
+      console.error("Erro ao adicionar serviço:", error);
+      showModal("Não foi possível adicionar o serviço.", "error");
+    }
   }
 
-  function handleRemoveService(serviceName) {
+  async function handleRemoveService(serviceName) {
     if (services.length === 1) {
-      showModal("É necessário manter pelo menos um serviço cadastrado.");
+      showModal("É necessário manter pelo menos um serviço cadastrado.", "info");
       return;
     }
 
     const confirmed = window.confirm(`Deseja excluir o serviço "${serviceName}"?`);
     if (!confirmed) return;
 
-    const updatedServices = services.filter((item) => item !== serviceName);
-    setServices(updatedServices);
-    localStorage.setItem(SERVICES_KEY, JSON.stringify(updatedServices));
+    const serviceToRemove = serviceDocs.find((item) => item.name === serviceName);
 
-    if (service === serviceName) {
-      setService(updatedServices[0]);
+    if (!serviceToRemove) {
+      showModal("Não foi possível localizar esse serviço no Firebase.", "error");
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, "services", serviceToRemove.id));
+
+      if (service === serviceName) {
+        const remainingServices = services.filter((item) => item !== serviceName);
+        setService(remainingServices[0] || "");
+      }
+    } catch (error) {
+      console.error("Erro ao remover serviço:", error);
+      showModal("Não foi possível remover o serviço.", "error");
     }
   }
 
   return (
     <div className="semfila-app">
       {successMessage && (
-      <div className="success-overlay">
-        <div className="success-modal">
-          <h2>Cadastro concluído com sucesso!</h2>
+        <div className="success-overlay">
+          <div className="success-modal">
+            <h2>Cadastro concluído com sucesso!</h2>
 
-          <p>Sua senha de atendimento é:</p>
+            <p>Sua senha de atendimento é:</p>
 
-          <div className="success-ticket-number">
-            {generatedTicket}
+            <div className="success-ticket-number">
+              {generatedTicket}
+            </div>
+
+            <p className="success-text">
+              Aguarde ser chamado pelo painel ou acompanhe sua posição na fila.
+            </p>
+
+            <button type="button" onClick={() => setSuccessMessage(false)}>
+              Entendi
+            </button>
           </div>
-
-          <p className="success-text">
-            Aguarde ser chamado pelo painel ou acompanhe sua posição na fila.
-          </p>
-
-          <button type="button" onClick={() => setSuccessMessage(false)}>
-            Entendi
-          </button>
         </div>
-      </div>
-    )}
-    {modalMessage && (
-  <div className="success-overlay">
-    <div className={`alert-modal ${modalType}`}>
-      <h2>
-        {modalType === "error"
-          ? "Atenção"
-          : modalType === "success"
-          ? "Sucesso"
-          : "Aviso"}
-      </h2>
+      )}
 
-      <p>{modalMessage}</p>
+      {modalMessage && (
+        <div className="success-overlay">
+          <div className={`alert-modal ${modalType}`}>
+            <h2>
+              {modalType === "error"
+                ? "Atenção"
+                : modalType === "success"
+                ? "Sucesso"
+                : "Aviso"}
+            </h2>
 
-      <button type="button" onClick={() => setModalMessage("")}>
-        Entendi
-      </button>
-    </div>
-  </div>
-)}
+            <p>{modalMessage}</p>
 
-    
-
-
+            <button type="button" onClick={() => setModalMessage("")}>
+              Entendi
+            </button>
+          </div>
+        </div>
+      )}
 
       <header className="topbar">
         <div>
@@ -1100,13 +1253,14 @@ export default function SemFilaApp() {
             onClick={handleAdminTabClick}
             type="button"
           >
-            Painel
+            Painel de Atendimento
           </button>
         </div>
       </header>
 
       {activeTab === "mobile" ? (
         <MobileUserPage
+          queue={queue}
           lastTicket={syncedLastTicket}
           name={name}
           setName={setName}
